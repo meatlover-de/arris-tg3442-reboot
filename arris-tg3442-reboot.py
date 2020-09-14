@@ -1,7 +1,7 @@
 from firmware import get_firmware_handler
 
 from bs4 import BeautifulSoup
-from Crypto.Cipher import AES
+from Cryptodome.Cipher import AES
 import hashlib
 import json
 import re
@@ -12,9 +12,10 @@ import argparse
 
 def getOptions(args=sys.argv[1:]):
     parser = argparse.ArgumentParser(description="Reboot Arris TG3442* cable router remotely.")
-    parser.add_argument("-u", "--username", help="router login username", action='store', dest='username', default='admin')
-    parser.add_argument("-p", "--password", help="router login password", action='store', dest='password', default='password')
+    parser.add_argument("-u", "--username", help="router login username", action='store', dest='username')
+    parser.add_argument("-p", "--password", help="router login password", action='store', dest='password')
     parser.add_argument("-t", "--target", help="router IP address/url (prepended by http)", action='store', dest='url', default='http://192.168.100.1')
+    parser.add_argument("-a", "--action", help="action to perform (restart|uptime|docsis)", action='store', dest='action', default='uptime')
 
     if (len(args) == 0):
         parser.print_help()
@@ -36,7 +37,7 @@ def login(session, url, username, password):
 
     current_session_id = re.search(r".*var currentSessionId = '(.+)';.*", str(soup.head))[1]
 
-    key = hashlib.pbkdf2_hmac('sha256', bytes(password.encode("ascii")), salt, iterations=1000, dklen=128/8)
+    key = hashlib.pbkdf2_hmac('sha256', bytes(password.encode("ascii")), salt, iterations=1000, dklen=16)
 
     secret = {"Password": password, "Nonce": current_session_id}
     plaintext = bytes(json.dumps(secret).encode("ascii"))
@@ -87,11 +88,33 @@ def login(session, url, username, password):
 def _unpad(s):
     return s[:-ord(s[len(s) - 1:])]
 
-
 def restart(session):
     restart_request_data = {"RestartReset": "Restart"}
     session.put(f"{url}/php/ajaxSet_status_restart.php", data=json.dumps(restart_request_data))
 
+def uptime(session):
+    r = session.get(f"{url}/php/status_status_data.php")
+    lines = re.split('\n', r.text)
+    for line in lines:
+      if re.search('js_UptimeSinceReboot',line):
+        days = re.sub(r"    var js_UptimeSinceReboot = '([0-9]+),(\d+),(\d+)';",r"\1", line)
+        hours = re.sub(r"    var js_UptimeSinceReboot = '([0-9]+),(\d+),(\d+)';",r"\2", line)
+        minutes = re.sub(r"    var js_UptimeSinceReboot = '([0-9]+),(\d+),(\d+)';",r"\3", line)
+        uptime_minutes = int(days)*24*60 + int(hours)*60 + int(minutes)
+        print(uptime_minutes)
+
+def docsis(session):
+    r = session.get(f"{url}/php/status_docsis_data.php")
+    lines = re.split('\n', r.text)
+    for line in lines:
+      if re.search('json_dsData',line):
+        dsData = re.sub(r"^json_dsData = [(.*)]';",r"\1", line)
+        dsJSON = json.loads(dsData)
+        json.dumps(dsJSON)
+      if re.search('json_usData',line):
+        usData = re.sub(r"^json_usData = [(.*)]';",r"\1", line)
+        usJSON = json.loads(usData)
+        json.dumps(dsJSON)
 
 if __name__ == "__main__":
     userArguments = getOptions()
@@ -99,11 +122,15 @@ if __name__ == "__main__":
     url = userArguments.url
     username = userArguments.username
     password = userArguments.password
+    action = userArguments.action
 
     session = requests.Session()
 
     login(session, url, username, password)
-    print("Login successfull")
 
-    print("Attempting restart - this can take a few minutes.")
-    restart(session)
+    if action == 'uptime':
+      uptime(session)
+    if action == 'docsis':
+      docsis(session)
+    if action == 'restart':
+      restart(session)
