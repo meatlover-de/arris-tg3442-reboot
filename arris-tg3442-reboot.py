@@ -1,7 +1,7 @@
 from firmware import get_firmware_handler
 
 from bs4 import BeautifulSoup
-from Cryptodome.Cipher import AES
+from Crypto.Cipher import AES
 import hashlib
 import json
 import re
@@ -107,14 +107,15 @@ def docsis(session):
     r = session.get(f"{url}/php/status_docsis_data.php")
     lines = re.split('\n', r.text)
     for line in lines:
-      if re.search('json_dsData',line):
-        dsData = re.sub(r"^json_dsData = [(.*)]';",r"\1", line)
+      if re.search('json_dsData',line) and not re.search('JSON.stringify',line):
+        dsData = re.sub(r"^.*json_dsData = \[{(.*)}\];.*$",r"[{\1}]", line)
         dsJSON = json.loads(dsData)
         json.dumps(dsJSON)
-      if re.search('json_usData',line):
-        usData = re.sub(r"^json_usData = [(.*)]';",r"\1", line)
-        usJSON = json.loads(usData)
-        json.dumps(dsJSON)
+      # json_usData = [{
+      if re.search('json_usData',line) and not re.search('JSON.stringify',line):
+        usData = re.sub(r"^.*json_usData = \[{(.*)}\];.*$","[{\1}]", line)
+        #usJSON = json.loads(usData)
+        #json.dumps(dsJSON)
 
 if __name__ == "__main__":
     userArguments = getOptions()
